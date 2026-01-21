@@ -62,7 +62,7 @@ while IFS= read -r SCAFFOLD_ID; do
   # Use bcftools view to filter by region (-r)
   bcftools view -r "$SCAFFOLD_ID" \
     -o "$OUTPUT_VCF" \
-    -O z \
+    -O v \
     "$INPUT_VCF"
     
 done < WTD_L90_scaffs.list
@@ -79,5 +79,6 @@ while IFS= read -r SCAFFOLD_ID; do
   # -b: Output in BAM format
   # -@ 4: Use 4 threads (adjust as needed for faster processing)
   samtools view -b -@ 4 -o "$OUTPUT_BAM" "${BAMDIR}/$SAMPLE.merged.sorted.bam" "$SCAFFOLD_ID"
+  samtools index "$OUTPUT_BAM"
     
 done < WTD_L90_scaffs.list
