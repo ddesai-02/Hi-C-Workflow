@@ -2,25 +2,22 @@
 #SBATCH --account=rrg-shaferab
 #SBATCH --mem 16G
 #SBATCH --cpus-per-task=1
-#SBATCH --time=2:59:00 
+#SBATCH --time=01:30:00 
 
-# =====================================
-# Hi-C Recombination Pipeline
-# =====================================
-
-# --- 1. Define Paths ---
+# --- 1. Define Paths and Load Modules ---
 MAIN="/home/devan/projects/def-shaferab/devan/Odocoileus_virginianus/sperm/HiC"
 
-SAMPLE_PREFIX="Lakota" # Change per individual
-SCAFFOLD_LIST="$MAIN/WTD_L90_scaffs.list" # Change per species
+SAMPLE_PREFIX="838" # Change per individual
+SCAFFOLD_LIST="$MAIN/MD_L90_scaffs.list" # Change per species
 HAPCUT2_DIR="$MAIN/HapCUT2/build"
 HI_RECOMB_DIR="$MAIN/Hi-reComb/Build"
 
+module load samtools
 
 # --- 2. Define Input Directories ---
 # Input files should be separated by scaffold
-INPUT_BAM_DIR="$MAIN/$SAMPLE_PREFIX/bam_dir/bam_scaffs" # For HapCUT2 extractHAIRS
-INPUT_VCF_DIR="$MAIN/$SAMPLE_PREFIX/vcf_files/scaffolds"  # For HapCUT2 extractHAIRS and HAPCUT2 phasing
+INPUT_BAM_DIR="$MAIN/$SAMPLE_PREFIX/bam_dir/bam_scaffs"
+INPUT_VCF_DIR="$MAIN/$SAMPLE_PREFIX/vcf_files/scaffolds"
 
 # --- 3. Define Output Directories ---
 # Create the main folder and sub-directories
@@ -48,12 +45,13 @@ while IFS= read -r SCAFFOLD_ID; do
     FRAG_OUT="${OUTPUT_FRAG_DIR}/hapcutFragments_${SCAFFOLD_ID}.txt"
     HAPS_OUT="${OUTPUT_HAPS_DIR}/${SCAFFOLD_ID}_PHASE.txt"
     SAM_OUT="${OUTPUT_SAM_DIR}/${SCAFFOLD_ID}_INFORMATIVE_READS.sam"
-    MAP_OUT="${OUTPUT_MAPS_DIR}/${SCAFFOLD_ID}_RecombMap.txt"
+    MAP_OUT="${OUTPUT_MAPS_DIR}/${SCAFFOLD_ID}_RecombLog.txt"
 
     # =================================================================
     # STEP 1: HapCUT2 extractHAIRS (Generate Fragment File)
     # =================================================================
 
+    echo "1/4. Running **extractHAIRS**..."
     "${HAPCUT2_DIR}/extractHAIRS" \
         --hic 1 \
         --VCF "$VCF_IN" \
@@ -100,17 +98,30 @@ while IFS= read -r SCAFFOLD_ID; do
     # STEP 4: Hi-reComb RecombMap (Estimate Recombination Map)
     # =================================================================
     echo "4/4. Running **RecombMap**..."
-    "${HI_RECOMB_DIR}/Hi-reComb" RecombMap -d 500 -q 20 \
+    
+    # Run this command inside the directory
+    cd "$OUTPUT_MAPS_DIR"
+    
+    "${HI_RECOMB_DIR}/Hi-reComb" RecombMap -n "$SCAFFOLD_ID" \
         "$HAPS_OUT" \
-        "$SAM_OUT" \
-        > "$MAP_OUT" 2>/dev/null
+        "$SAM_OUT" > "$MAP_OUT" 2>/dev/null
+    
+    RECOMB_EXIT=$?  # <--- Captures exit status
+    
+    cd - >/dev/null # Return to the previous directory
 
-    if [ -s "$MAP_OUT" ]; then
-        echo "   ✅ **SUCCESS**: Recombination map created: $MAP_OUT"
+    # Gets read pairs
+    if [ "$RECOMB_EXIT" -eq 0 ] && [ -s "$MAP_OUT" ]; then
+        FINAL_PAIRS=$(grep "Left with" "$MAP_OUT" 2>/dev/null | grep -oP '\d+(?= read pairs)' || echo "0")
+        echo "   ✅ **SUCCESS**: Map created with $FINAL_PAIRS usable read pairs"
+        
+    elif [ "$RECOMB_EXIT" -eq 136 ] || [ "$RECOMB_EXIT" -eq 8 ]; then
+        FINAL_PAIRS=$(grep "Left with" "$MAP_OUT" 2>/dev/null | grep -oP '\d+(?= read pairs)' || echo "0")
+        echo "   ⚠️  SKIPPED: Too few usable read pairs after filtering ($FINAL_PAIRS)"
+        echo "   (Log saved: $MAP_OUT)"
     else
-        echo "   ⚠️ WARNING: Map file is empty or missing for $SCAFFOLD_ID."
+        echo "   ❌ ERROR: RecombMap failed with exit code $RECOMB_EXIT"
     fi
-
 done < "$SCAFFOLD_LIST"
 
 echo -e "\n====================================================================="
